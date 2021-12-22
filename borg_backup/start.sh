@@ -5,7 +5,10 @@ export BORG_BASE_DIR="/data"
 export BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK="yes"
 export BORG_RSH="ssh -i ~/.ssh/id_ed25519 -o UserKnownHostsFile=/data/known_hosts"
 
+tmpdir=$(mktemp -d /backup/hassio-borg-XXXXXXXX)
 PUBLIC_KEY=`cat ~/.ssh/id_ed25519.pub`
+
+trap 'rm -rf "$tmpdir"' EXIT
 
 bashio::log.info "A public/private key pair was generated for you."
 bashio::log.notice "Please use this public key on the backup server:"
@@ -31,10 +34,66 @@ for i in /backup/*.tar; do
   bashio::log.info "Backing up $backup_info"
 done
 
-bashio::log.info 'Uploading backup.'
-/usr/bin/borg create $(bashio::config 'create_options') \
-  "::$(bashio::config 'archive')-{utcnow}" /backup \
-  || bashio::exit.nok "Could not upload backup."
+if [ "$(bashio::config 'deduplicate_archives')" ]; then
+  for i in /backup/*.tar; do
+    archive_name=$(tar xf "$i" ./backup.json -O | jq -r '[.name, .date] | join("-")' || true)
+
+    if [ -z "$archive_name" ]; then
+      bashio::log.error "Impossible to get backup info for $archive_name." \
+        "Ensure it's a vaild backup file or disable deduplicate_archives option"
+      continue
+    fi
+
+    borg_archive_name=$(bashio::config 'archive')-$archive_name
+    if borg list | grep -Fqs "$borg_archive_name"; then
+      bashio::log.info "Skipping archive $i, it's already in the archive"
+      continue
+    fi
+
+    # Handle this manually till we can't use borg import-tar
+    bashio::log.info "Extracting $i..."
+    finaltar="$tmpdir/$(basename "$i")"
+    tardir="$tmpdir/$(basename "$i" .tar)"
+    mkdir "$tardir"
+    tar xf "$i" -C "$tardir"
+
+    for archive in "$tardir"/*.tar.*; do
+      bashio::log.info "Decompressing $archive..."
+      case "$archive" in
+        *.gz)
+          gunzip "$archive"
+          ;;
+        *.xz)
+          unxz "$archive"
+          ;;
+        *.lz4)
+          unlz4 "$archive"
+          ;;
+        *)
+          bashio::log.error "Impossible to extract $archive in $archive_name." \
+            "It won't be deduplicated"
+          ;;
+      esac
+    done
+
+    bashio::log.info "Recreating uncompressed tar in $finaltar..."
+    timestamp=$(jq -r '.date' "$tardir"/backup.json | sed 's/\.[0-9:+]\+$//')
+    [ -z "$timestamp" ] && timestamp="$i" || true
+    tar cf "$finaltar" -C "$tardir" .
+    rm -r "$tardir"
+
+    bashio::log.info "Uploading backup $i as $archive_name."
+    /usr/bin/borg create $(bashio::config 'create_options') \
+      --timestamp "$timestamp" "::$borg_archive_name" "$finaltar" \
+      || bashio::exit.nok "Could not upload backup $i."
+    rm -rf "$finaltar"
+  done
+else
+  bashio::log.info 'Uploading backup.'
+  /usr/bin/borg create $(bashio::config 'create_options') \
+    "::$(bashio::config 'archive')-{utcnow}" /backup \
+    || bashio::exit.nok "Could not upload backup."
+fi
 
 bashio::log.info 'Checking backups.'
 borg check --archives-only -P "$(bashio::config 'archive')"
