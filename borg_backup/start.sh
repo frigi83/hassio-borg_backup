@@ -2,6 +2,7 @@
 export BORG_REPO="ssh://$(bashio::config 'user')@$(bashio::config 'host'):$(bashio::config 'port')/$(bashio::config 'path')"
 export BORG_PASSPHRASE="$(bashio::config 'passphrase')"
 export BORG_BASE_DIR="/data"
+export BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK="yes"
 export BORG_RSH="ssh -i ~/.ssh/id_ed25519 -o UserKnownHostsFile=/data/known_hosts"
 
 PUBLIC_KEY=`cat ~/.ssh/id_ed25519.pub`
@@ -17,7 +18,7 @@ if [ ! -f /data/known_hosts ]; then
 fi
 
 bashio::log.info 'Trying to initialize the Borg repository.'
-/usr/bin/borg init -e repokey || true
+/usr/bin/borg init -e "$(bashio::config 'encryption')" || true
 
 if [ "$(date +%u)" = 7 ]; then
   bashio::log.info 'Checking archive integrity. (Today is Sunday.)'
