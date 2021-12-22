@@ -22,6 +22,7 @@ fi
 
 bashio::log.info 'Trying to initialize the Borg repository.'
 /usr/bin/borg init -e "$(bashio::config 'encryption')" || true
+/usr/bin/borg info || bashio::exit.nok "Borg repository is not readable."
 
 if [ "$(date +%u)" = 7 ]; then
   bashio::log.info 'Checking archive integrity. (Today is Sunday.)'
