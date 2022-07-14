@@ -52,42 +52,53 @@ if [ "$(bashio::config 'deduplicate_archives')" ]; then
     fi
 
     # Handle this manually till we can't use borg import-tar
-    bashio::log.info "Extracting $i..."
-    finaltar="$tmpdir/$(basename "$i")"
-    tardir="$tmpdir/$(basename "$i" .tar)"
-    mkdir "$tardir"
-    tar xf "$i" -C "$tardir"
+    compressed=$(tar xf "$i" ./backup.json -O | jq -r '.compressed' || true)
+    if [[ "$compressed" == 'false' ]]; then
+      bashio::log.info "Archive $i, it's already uncompressed"
+      finaltar="$i"
+    else
+      bashio::log.info "Archive needs to be uncompressed, extracting $i..."
+      finaltar="$tmpdir/$(basename "$i")"
+      tardir="$tmpdir/$(basename "$i" .tar)"
+      mkdir "$tardir"
+      tar xf "$i" -C "$tardir"
 
-    for archive in "$tardir"/*.tar.*; do
-      bashio::log.info "Decompressing $archive..."
-      case "$archive" in
-        *.gz)
-          gunzip "$archive"
-          ;;
-        *.xz)
-          unxz "$archive"
-          ;;
-        *.lz4)
-          unlz4 "$archive"
-          ;;
-        *)
-          bashio::log.error "Impossible to extract $archive in $archive_name." \
-            "It won't be deduplicated"
-          ;;
-      esac
-    done
+      for archive in "$tardir"/*.tar.*; do
+        bashio::log.info "Decompressing $archive..."
+        case "$archive" in
+          *.gz)
+            gunzip "$archive"
+            ;;
+          *.xz)
+            unxz "$archive"
+            ;;
+          *.lz4)
+            unlz4 "$archive"
+            ;;
+          *)
+            bashio::log.error "Impossible to extract $archive in $archive_name." \
+              "It won't be deduplicated"
+            ;;
+        esac
+      done
 
-    bashio::log.info "Recreating uncompressed tar in $finaltar..."
-    timestamp=$(jq -r '.date' "$tardir"/backup.json | sed 's/\.[0-9:+]\+$//')
-    [ -z "$timestamp" ] && timestamp="$i" || true
-    tar cf "$finaltar" -C "$tardir" .
-    rm -r "$tardir"
+      bashio::log.info "Recreating uncompressed tar in $finaltar..."
+      [ -z "$timestamp" ] && timestamp="$i" || true
+      tar cf "$finaltar" -C "$tardir" .
+      recreated=true
+      rm -r "$tardir"
+    fi
+
+    timestamp=$(tar xf "$finaltar" ./backup.json -O | jq -r '.date' | sed 's/\.[0-9:+]\+$//')
 
     bashio::log.info "Uploading backup $i as $archive_name."
     /usr/bin/borg create $(bashio::config 'create_options') \
       --timestamp "$timestamp" "::$borg_archive_name" "$finaltar" \
       || bashio::exit.nok "Could not upload backup $i."
-    rm -rf "$finaltar"
+
+    if [[ "$recreated" == true ]]; then
+      rm -rf "$finaltar"
+    fi
   done
 else
   bashio::log.info 'Uploading backup.'
