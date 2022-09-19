@@ -16,9 +16,12 @@
     "host": null,
     "port": 22,
     "path": "~",
+    "encryption": "repokey",
     "archive": "hassio",
     "passphrase": null,
+    "create_options": "--stats --compression auto,zstd",
     "prune_options": "--keep-daily=8 --keep-weekly=5 --keep-monthly=13",
+    "deduplicate_archives": false,
     "local_snapshot": 3
   },
   "schema": {
@@ -26,9 +29,12 @@
     "host": "str",
     "port": "port",
     "path": "str",
+    "encryption": "str",
     "archive": "str",
     "passphrase": "password",
     "prune_options": "str?",
+    "create_options": "str?",
+    "deduplicate_archives": "bool",
     "local_snapshot": "int(0,)?"
   },
   "arch": [

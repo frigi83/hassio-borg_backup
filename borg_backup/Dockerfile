@@ -5,7 +5,8 @@ ENV LANG C.UTF-8
 RUN apk add --no-cache --update \
           borgbackup \
           openssh-client \
-          openssh-keygen
+          openssh-keygen \
+          jq
 
 WORKDIR /
 
